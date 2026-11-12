@@ -1,6 +1,6 @@
 {
   "formato": "catdog-weights-f32-v1",
-  "tamano": 100,
+  "tamano": 160,
   "canales": 3,
   "clases": [
     "gato",
