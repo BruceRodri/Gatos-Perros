@@ -1,0 +1,123 @@
+{
+  "formato": "catdog-weights-f32-v1",
+  "tamano": 100,
+  "canales": 3,
+  "clases": [
+    "gato",
+    "perro"
+  ],
+  "nota": "VALOR SIGMOID: 0=GATO, 1=PERRO",
+  "capas": {
+    "conv_1": [
+      {
+        "forma": [
+          3,
+          3,
+          3,
+          32
+        ],
+        "offset": 0,
+        "elementos": 864
+      },
+      {
+        "forma": [
+          32
+        ],
+        "offset": 3456,
+        "elementos": 32
+      }
+    ],
+    "conv_2": [
+      {
+        "forma": [
+          3,
+          3,
+          32,
+          64
+        ],
+        "offset": 3584,
+        "elementos": 18432
+      },
+      {
+        "forma": [
+          64
+        ],
+        "offset": 77312,
+        "elementos": 64
+      }
+    ],
+    "conv_3": [
+      {
+        "forma": [
+          3,
+          3,
+          64,
+          128
+        ],
+        "offset": 77568,
+        "elementos": 73728
+      },
+      {
+        "forma": [
+          128
+        ],
+        "offset": 372480,
+        "elementos": 128
+      }
+    ],
+    "conv_4": [
+      {
+        "forma": [
+          3,
+          3,
+          128,
+          128
+        ],
+        "offset": 372992,
+        "elementos": 147456
+      },
+      {
+        "forma": [
+          128
+        ],
+        "offset": 962816,
+        "elementos": 128
+      }
+    ],
+    "densa_1": [
+      {
+        "forma": [
+          128,
+          128
+        ],
+        "offset": 963328,
+        "elementos": 16384
+      },
+      {
+        "forma": [
+          128
+        ],
+        "offset": 1028864,
+        "elementos": 128
+      }
+    ],
+    "salida": [
+      {
+        "forma": [
+          128,
+          1
+        ],
+        "offset": 1029376,
+        "elementos": 128
+      },
+      {
+        "forma": [
+          1
+        ],
+        "offset": 1029888,
+        "elementos": 1
+      }
+    ]
+  },
+  "bytes_total": 1029892
+}

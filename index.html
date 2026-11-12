@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b1220">
+  <title>CatDog Vision — Clasificador CNN</title>
+  <style>
+    :root {color-scheme:dark; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+    * {box-sizing:border-box}
+    body {margin:0;min-height:100vh;background:radial-gradient(ellipse at 70% 5%,#152c52 0%,#0b1220 50%,#070e18 100%);color:#edf4ff}
+    .container {width:min(650px,calc(100% - 30px));margin:0 auto;padding:30px 0 45px}
+    .eyebrow {font-size:12px;letter-spacing:.2em;font-weight:800;color:#7aa9ff;text-transform:uppercase;margin-bottom:8px}
+    h1 {font-size:clamp(30px,6vw,44px);letter-spacing:-.045em;margin:0 0 10px}
+    .subtitle {color:#aab9d0;line-height:1.55;margin:0 0 24px}
+    .viewer {border:1px solid #344564;border-radius:20px;overflow:hidden;background:#121b2b;position:relative;aspect-ratio:4/3;display:grid;place-items:center}
+    video {height:100%;width:100%;object-fit:cover;display:none}
+    .placeholder {font-size:60px;opacity:.45;display:grid;place-items:center;text-align:center;gap:12px}
+    .placeholder span {font-size:14px;color:#b9c4d5;opacity:1}
+    .tag {position:absolute;bottom:14px;left:14px;padding:8px 12px;background:#0b1220dd;border:1px solid #3e5172;border-radius:12px;color:#d8e6ff;font-size:12px}
+    .actions {display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:14px 0}
+    button, .upload {appearance:none;background:#367af6;color:#fff;border:0;border-radius:12px;padding:13px 12px;font-size:14px;font-weight:700;text-align:center;cursor:pointer}
+    button.secondary, .upload {background:#192944;border:1px solid #345077;color:#d6e5ff}
+    button:disabled {opacity:.4;cursor:not-allowed}
+    .upload {display:block;grid-column:1/-1}
+    .upload input {display:none}
+    .result {background:#121d30;border:1px solid #283b58;border-radius:18px;padding:18px;margin-top:12px}
+    .status {color:#b9c9dd;font-size:13px;line-height:1.5;margin-bottom:12px;min-height:19px;overflow-wrap:anywhere}
+    .primary-result {font-size:28px;letter-spacing:-.035em;font-weight:800;margin:8px 0 4px}
+    .certainty {color:#a7bad8;font-size:13px;margin-bottom:14px}
+    .prob-label {display:flex;align-items:center;justify-content:space-between;margin-top:12px;font-size:13px;color:#dfebff}
+    .bar {height:9px;border-radius:6px;background:#263650;overflow:hidden;margin-top:7px}
+    .fill {height:100%;width:0%;border-radius:6px;transition:width .3s ease}
+    #barDog {background:#65a7ff} #barCat {background:#f0ae74}
+    .note {font-size:12px;line-height:1.5;color:#91a3be;margin-top:15px}
+    .chip {display:inline-block;font-size:11px;color:#9db5d4;background:#172840;border:1px solid #2a4161;border-radius:50px;padding:5px 9px;margin-top:14px}
+    @media(min-width:530px) {.actions {grid-template-columns:1fr 1fr 1fr}.upload {grid-column:auto}}
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+</head>
+<body>
+<main class="container">
+  <div class="eyebrow">Deep Learning · TensorFlow.js</div>
+  <h1>CatDog Vision</h1>
+  <p class="subtitle">Clasificación de perros y gatos con una red neuronal convolucional entrenada en Google Colab. Procesamiento en el navegador.</p>
+  <div class="viewer">
+    <div id="placeholder" class="placeholder">🐶 🐱 <span>Activa la cámara para comenzar</span></div>
+    <video id="video" autoplay muted playsinline></video>
+    <div class="tag">CNN · RGB 100 × 100</div>
+  </div>
+  <div class="actions">
+    <button id="startBtn">Iniciar cámara</button>
+    <button id="switchBtn" class="secondary" disabled>Cambiar cámara</button>
+    <label class="upload">Probar con foto<input id="fileInput" type="file" accept="image/*" capture="environment"></label>
+    <button id="stopBtn" class="secondary" disabled>Detener cámara</button>
+  </div>
+  <div class="result" aria-live="polite">
+    <div class="status" id="status">Modelo listo para cargarse al iniciar la cámara o seleccionar una foto.</div>
+    <div id="resultTitle" class="primary-result">Sin predicción</div>
+    <div id="confidence" class="certainty">Esperando una imagen.</div>
+    <div class="prob-label"><span>🐱 Gato</span><b id="catPct">—</b></div>
+    <div class="bar"><div id="barCat" class="fill"></div></div>
+    <div class="prob-label"><span>🐶 Perro</span><b id="dogPct">—</b></div>
+    <div class="bar"><div id="barDog" class="fill"></div></div>
+  </div>
+  <div class="chip" id="backend">Motor de inferencia: pendiente</div>
+  <p class="note">El modelo solo distingue estas dos categorías. Una imagen vacía, de otro animal o poco clara también podría dar una probabilidad. Para la cámara se requiere HTTPS y autorización del navegador. Las imágenes no se suben a un servidor.</p>
+</main>
+<script>
+'use strict';
+const IMG_SIZE = 100;
+const video = document.getElementById('video');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const switchBtn = document.getElementById('switchBtn');
+const fileInput = document.getElementById('fileInput');
+const statusEl = document.getElementById('status');
+const resultTitle = document.getElementById('resultTitle');
+const confidence = document.getElementById('confidence');
+const placeholder = document.getElementById('placeholder');
+let model = null;
+let stream = null;
+let active = false;
+let facing = 'environment';
+let timer = null;
+let busy = false;
+
+function status(message) { statusEl.textContent = message; }
+function makeModel() {
+  const m = tf.sequential();
+  m.add(tf.layers.conv2d({name:'conv_1',inputShape:[IMG_SIZE,IMG_SIZE,3],filters:32,kernelSize:3,padding:'same',activation:'relu'}));
+  m.add(tf.layers.maxPooling2d({name:'pool_1',poolSize:2,strides:2}));
+  m.add(tf.layers.conv2d({name:'conv_2',filters:64,kernelSize:3,padding:'same',activation:'relu'}));
+  m.add(tf.layers.maxPooling2d({name:'pool_2',poolSize:2,strides:2}));
+  m.add(tf.layers.conv2d({name:'conv_3',filters:128,kernelSize:3,padding:'same',activation:'relu'}));
+  m.add(tf.layers.maxPooling2d({name:'pool_3',poolSize:2,strides:2}));
+  m.add(tf.layers.conv2d({name:'conv_4',filters:128,kernelSize:3,padding:'same',activation:'relu'}));
+  m.add(tf.layers.maxPooling2d({name:'pool_4',poolSize:2,strides:2}));
+  m.add(tf.layers.globalAveragePooling2d({name:'promedio_global',dataFormat:'channelsLast'}));
+  m.add(tf.layers.dense({name:'densa_1',units:128,activation:'relu'}));
+  m.add(tf.layers.dropout({name:'dropout',rate:0.35}));
+  m.add(tf.layers.dense({name:'salida',units:1,activation:'sigmoid'}));
+  return m;
+}
+
+async function loadModel() {
+  if (model) return;
+  if (typeof tf === 'undefined') throw new Error('No se cargó TensorFlow.js. Revisa tu conexión a Internet.');
+  status('Cargando los pesos del modelo entrenado…');
+  const [resConfig, resWeights] = await Promise.all([fetch('./config.json'),fetch('./pesos.bin')]);
+  if (!resConfig.ok || !resWeights.ok) throw new Error('Faltan config.json o pesos.bin. Publícalos junto a index.html.');
+  const config = await resConfig.json();
+  if (config.formato !== 'catdog-weights-f32-v1' || config.tamano !== IMG_SIZE || config.canales !== 3) {
+    throw new Error('La configuración exportada no coincide con esta página.');
+  }
+  const raw = await resWeights.arrayBuffer();
+  const expected = config.bytes_total;
+  if (raw.byteLength !== expected) throw new Error('El archivo de pesos está incompleto.');
+  const m = makeModel();
+  try {
+    for (const layer of m.layers) {
+      const specs = config.capas[layer.name] || [];
+      if (!specs.length) continue;
+      const current = layer.getWeights();
+      if (current.length !== specs.length) {
+        current.forEach(t=>t.dispose());
+        throw new Error('Cantidad de pesos diferente en ' + layer.name);
+      }
+      const tensors = specs.map((spec, i) => {
+        const shape = current[i].shape;
+        if (JSON.stringify(shape) !== JSON.stringify(spec.forma)) throw new Error('Forma de pesos diferente en ' + layer.name);
+        const floats = new Float32Array(raw, spec.offset, spec.elementos);
+        return tf.tensor(floats, spec.forma, 'float32');
+      });
+      current.forEach(t=>t.dispose());
+      layer.setWeights(tensors);
+      tensors.forEach(t=>t.dispose());
+    }
+    const warmup = tf.tidy(()=>m.predict(tf.zeros([1, IMG_SIZE,IMG_SIZE,3])));
+    await warmup.data();
+    warmup.dispose();
+    model = m;
+    document.getElementById('backend').textContent = 'Motor de inferencia: ' + tf.getBackend();
+    status('Modelo cargado correctamente. Puedes comenzar la prueba.');
+  } catch (e) { m.dispose(); throw e; }
+}
+
+async function classify(source) {
+  if (!model) return;
+  const output = tf.tidy(() => {
+    const rgb = tf.browser.fromPixels(source).toFloat();
+    const x = tf.image.resizeBilinear(rgb, [IMG_SIZE,IMG_SIZE]).div(255).expandDims(0);
+    return model.predict(x);
+  });
+  let probability;
+  try {probability = (await output.data())[0];}
+  finally {output.dispose();}
+  const dog = Math.min(1,Math.max(0,probability));
+  const cat = 1 - dog;
+  document.getElementById('dogPct').textContent = (dog*100).toFixed(1) + '%';
+  document.getElementById('catPct').textContent = (cat*100).toFixed(1) + '%';
+  document.getElementById('barDog').style.width = (dog*100).toFixed(1) + '%';
+  document.getElementById('barCat').style.width = (cat*100).toFixed(1) + '%';
+  const max = Math.max(dog,cat);
+  resultTitle.textContent = max < 0.65 ? 'Imagen poco clara' : (dog >= .5 ? '🐶 Perro' : '🐱 Gato');
+  confidence.textContent = 'Probabilidad estimada de la categoría principal: ' + (max*100).toFixed(1) + '%';
+}
+
+async function runLoop() {
+  if (!active) return;
+  if (!busy && video.readyState >= 2 && video.videoWidth > 0) {
+    busy = true;
+    try {await classify(video);} catch(e) {status('Error al predecir: '+ e.message);stopCamera();}
+    busy = false;
+  }
+  if (active) timer = setTimeout(runLoop, 500);
+}
+
+function stopCamera() {
+  active = false;
+  if(timer) clearTimeout(timer);
+  timer=null;
+  if(stream) stream.getTracks().forEach(track=>track.stop());
+  stream=null;
+  video.pause();
+  video.srcObject=null;
+  video.style.display='none';
+  placeholder.style.display='grid';
+  startBtn.disabled=false;
+  stopBtn.disabled=true;
+  switchBtn.disabled=true;
+}
+
+async function startCamera() {
+  try {
+    startBtn.disabled=true;
+    status('Preparando el modelo y solicitando la cámara…');
+    await loadModel();
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('El navegador requiere una página HTTPS para acceder a la cámara.');
+    if (stream) stopCamera();
+    stream = await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:facing},width:{ideal:640},height:{ideal:480}}});
+    video.srcObject=stream;
+    await video.play();
+    video.style.display='block';
+    placeholder.style.display='none';
+    active=true;
+    stopBtn.disabled=false;
+    switchBtn.disabled=false;
+    startBtn.disabled=true;
+    status('Cámara activa. Enfoca un perro o un gato con buena iluminación.');
+    runLoop();
+  } catch(e) {stopCamera();status('No se pudo iniciar: '+e.message);}
+}
+
+startBtn.addEventListener('click', startCamera);
+stopBtn.addEventListener('click', ()=>{stopCamera();status('Cámara detenida.');});
+switchBtn.addEventListener('click', ()=>{facing=facing==='environment'?'user':'environment';stopCamera();startCamera();});
+fileInput.addEventListener('change', async (e) => {
+  const file=e.target.files?.[0];
+  if(!file) return;
+  try {
+    status('Cargando foto y realizando inferencia…');
+    await loadModel();
+    const img = new Image();
+    const url=URL.createObjectURL(file);
+    try {
+      await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=url;});
+      await classify(img);
+      status('Foto analizada en el navegador, sin enviarla a un servidor.');
+    } finally {URL.revokeObjectURL(url);}
+  } catch(err){status('No se pudo analizar la foto: '+err.message);}
+  e.target.value='';
+});
+</script>
+</body>
+</html>
