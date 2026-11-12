@@ -55,7 +55,7 @@
     <button id="stopBtn" class="secondary" disabled>Detener cámara</button>
   </div>
   <div class="result" aria-live="polite">
-    <div class="status" id="status">Modelo listo para cargarse al iniciar la cámara o seleccionar una foto.</div>
+    <div class="status" id="status">Modelo listo. Inicia la cámara o selecciona una foto. Versión corregida 1.1.</div>
     <div id="resultTitle" class="primary-result">Sin predicción</div>
     <div id="confidence" class="certainty">Esperando una imagen.</div>
     <div class="prob-label"><span>🐱 Gato</span><b id="catPct">—</b></div>
@@ -69,6 +69,7 @@
 <script>
 'use strict';
 const IMG_SIZE = 100;
+// CORRECCIÓN 1.1: NO LIBERAR VARIABLES INTERNAS DE LAS CAPAS CNN.
 const video = document.getElementById('video');
 const startBtn = document.getElementById('startBtn');
 const stopBtn = document.getElementById('stopBtn');
@@ -121,20 +122,32 @@ async function loadModel() {
     for (const layer of m.layers) {
       const specs = config.capas[layer.name] || [];
       if (!specs.length) continue;
-      const current = layer.getWeights();
-      if (current.length !== specs.length) {
-        current.forEach(t=>t.dispose());
+      // CADA CAPA CONSERVA SUS VARIABLES DE PESOS; NO HAY QUE ELIMINARLAS.
+      // getWeights() PUEDE DEVOLVER REFERENCIAS A ESAS VARIABLES.
+      const actuales = layer.getWeights();
+      if (actuales.length !== specs.length) {
         throw new Error('Cantidad de pesos diferente en ' + layer.name);
       }
-      const tensors = specs.map((spec, i) => {
-        const shape = current[i].shape;
-        if (JSON.stringify(shape) !== JSON.stringify(spec.forma)) throw new Error('Forma de pesos diferente en ' + layer.name);
-        const floats = new Float32Array(raw, spec.offset, spec.elementos);
-        return tf.tensor(floats, spec.forma, 'float32');
-      });
-      current.forEach(t=>t.dispose());
-      layer.setWeights(tensors);
-      tensors.forEach(t=>t.dispose());
+      const tensoresNuevos = [];
+      try {
+        for (let i = 0; i < specs.length; i++) {
+          const spec = specs[i];
+          if (JSON.stringify(actuales[i].shape) !== JSON.stringify(spec.forma)) {
+            throw new Error('Forma de pesos diferente en ' + layer.name);
+          }
+          if (spec.offset % 4 !== 0 || spec.offset < 0 ||
+              spec.offset + spec.elementos * 4 > raw.byteLength) {
+            throw new Error('Bloque de pesos inválido en ' + layer.name);
+          }
+          const valores = new Float32Array(raw, spec.offset, spec.elementos);
+          tensoresNuevos.push(tf.tensor(valores, spec.forma, 'float32'));
+        }
+        // setWeights() ASIGNA LOS VALORES A LAS VARIABLES DEL MODELO.
+        layer.setWeights(tensoresNuevos);
+      } finally {
+        // SOLO SE LIBERAN LOS TENSORES TEMPORALES, NO LOS PESOS DEL MODELO.
+        tensoresNuevos.forEach(t => t.dispose());
+      }
     }
     const warmup = tf.tidy(()=>m.predict(tf.zeros([1, IMG_SIZE,IMG_SIZE,3])));
     await warmup.data();
